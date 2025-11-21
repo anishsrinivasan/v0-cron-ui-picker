@@ -39,6 +39,35 @@ const FREQUENCY_OPTIONS = [
   { value: "yearly", label: "Year" },
 ]
 
+function isCronMatch(date: Date, cronExpression: string, startMinute: number): boolean {
+  const [cronMinute, cronHour] = cronExpression.split(" ")
+
+  const minute = date.getMinutes()
+  const hour = date.getHours()
+
+  // Check minute
+  if (cronMinute !== "*") {
+    const cronMinuteNum = Number.parseInt(cronMinute)
+    if (minute !== cronMinuteNum) return false
+  }
+
+  // Check hour
+  if (cronHour === "*") return true
+
+  if (cronHour.startsWith("*/")) {
+    // Handle */n pattern (every n hours)
+    const interval = Number.parseInt(cronHour.substring(2))
+    return hour % interval === 0
+  }
+
+  // Handle specific hours
+  if (cronHour.includes(",")) {
+    return cronHour.split(",").map(Number).includes(hour)
+  }
+
+  return hour === Number.parseInt(cronHour)
+}
+
 function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
   const runs: string[] = []
 
@@ -52,6 +81,7 @@ function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
   endDateTime.setHours(endHour, endMinute, 0)
 
   const currentDate = new Date(startDateTime)
+  const cronExpression = generateCron(config)
 
   while (runs.length < count) {
     // Check if within end range
@@ -62,9 +92,10 @@ function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
     let isValid = false
 
     switch (config.frequency) {
-      case "hourly":
-        isValid = currentDate.getMinutes() === startMinute
+      case "hourly": {
+        isValid = isCronMatch(currentDate, cronExpression, startMinute)
         break
+      }
       case "daily":
         isValid = currentDate.getHours() === startHour && currentDate.getMinutes() === startMinute
         break
@@ -109,7 +140,7 @@ function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
     // Increment based on frequency
     switch (config.frequency) {
       case "hourly":
-        currentDate.setHours(currentDate.getHours() + config.interval)
+        currentDate.setHours(currentDate.getHours() + 1)
         break
       case "daily":
         currentDate.setDate(currentDate.getDate() + config.interval)
@@ -226,6 +257,31 @@ function convertToUTC(dateStr: string, timeStr: string, timezone: string): { dat
   }
 }
 
+function getStartTimeMismatch(config: RepeatConfig): string | null {
+  const nextRuns = calculateNextRuns(config, 1)
+  if (nextRuns.length === 0) return null
+
+  const [configYear, configMonth, configDay] = config.startDate.split("-").map(Number)
+  const [configHour, configMinute] = config.startTime.split(":").map(Number)
+  const configDateTime = new Date(configYear, configMonth - 1, configDay, configHour, configMinute, 0)
+
+  const firstRunStr = nextRuns[0]
+  const firstRunDate = new Date(firstRunStr)
+
+  const timeDifference =
+    configDateTime.getFullYear() !== firstRunDate.getFullYear() ||
+    configDateTime.getMonth() !== firstRunDate.getMonth() ||
+    configDateTime.getDate() !== firstRunDate.getDate() ||
+    configDateTime.getHours() !== firstRunDate.getHours() ||
+    configDateTime.getMinutes() !== firstRunDate.getMinutes()
+
+  if (timeDifference) {
+    return firstRunStr
+  }
+
+  return null
+}
+
 export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, initialConfig }) => {
   const today = new Date().toISOString().split("T")[0]
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0]
@@ -284,6 +340,8 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
 
   const description = generateDescription(config)
   const nextRuns = calculateNextRuns(config)
+
+  const firstRunMismatch = getStartTimeMismatch(config)
 
   const handleDone = () => {
     const output: CronOutput = {
@@ -384,6 +442,15 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
         <p className="mt-2 font-mono text-xs text-muted-foreground">CRON (Local): {cronExpression}</p>
         <p className="mt-1 font-mono text-xs text-muted-foreground">CRON (UTC): {cronInUTC}</p>
         <p className="mt-1 text-xs text-muted-foreground">Timezone: {userTimezone}</p>
+
+        {firstRunMismatch && (
+          <div className="mt-3 rounded-md bg-yellow-500/10 p-2 border border-yellow-500/30">
+            <p className="text-xs text-yellow-700 dark:text-yellow-400">
+              ⚠️ Note: Due to CRON limitations, the schedule will actually start at <strong>{firstRunMismatch}</strong>{" "}
+              instead of {config.startDate} at {config.startTime}.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
