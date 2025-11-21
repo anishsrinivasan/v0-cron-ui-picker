@@ -63,25 +63,34 @@ function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
 
     switch (config.frequency) {
       case "hourly":
-        isValid = true
+        isValid = currentDate.getMinutes() === startMinute
         break
       case "daily":
-        isValid = true
+        isValid = currentDate.getHours() === startHour && currentDate.getMinutes() === startMinute
         break
       case "weekly": {
         const dayOfWeek = currentDate.getDay()
-        isValid = config.daysOfWeek?.includes(dayOfWeek) ?? false
+        isValid =
+          (config.daysOfWeek?.includes(dayOfWeek) ?? false) &&
+          currentDate.getHours() === startHour &&
+          currentDate.getMinutes() === startMinute
         break
       }
       case "monthly": {
         const dayOfMonth = currentDate.getDate()
         const startDayOfMonth = new Date(startYear, startMonth - 1, startDay).getDate()
-        isValid = dayOfMonth === startDayOfMonth
+        isValid =
+          dayOfMonth === startDayOfMonth &&
+          currentDate.getHours() === startHour &&
+          currentDate.getMinutes() === startMinute
         break
       }
       case "yearly":
         isValid =
-          currentDate.getMonth() === startDateTime.getMonth() && currentDate.getDate() === startDateTime.getDate()
+          currentDate.getMonth() === startDateTime.getMonth() &&
+          currentDate.getDate() === startDateTime.getDate() &&
+          currentDate.getHours() === startHour &&
+          currentDate.getMinutes() === startMinute
         break
     }
 
