@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -17,6 +17,8 @@ export interface RepeatConfig {
 
 export interface CronOutput {
   cron: string
+  cronInUTC: string
+  timezone: string
   config: RepeatConfig
   description: string
   nextRuns: string[]
@@ -118,9 +120,11 @@ function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
   return runs
 }
 
-function generateCron(config: RepeatConfig): string {
+function generateCron(config: RepeatConfig, useUTC = false): string {
   const { frequency, interval, daysOfWeek } = config
-  const [hour, minute] = config.startTime.split(":").map(Number)
+  const [hour, minute] = useUTC
+    ? [Number(config.startTime.split(":")[0]), Number(config.startTime.split(":")[1])]
+    : config.startTime.split(":").map(Number)
 
   let cronExpression = ""
 
@@ -191,9 +195,33 @@ function generateDescription(config: RepeatConfig): string {
   return desc
 }
 
+function convertToUTC(dateStr: string, timeStr: string, timezone: string): { date: string; time: string } {
+  const [year, month, day] = dateStr.split("-").map(Number)
+  const [hours, minutes] = timeStr.split(":").map(Number)
+
+  // Create date in local timezone
+  const localDate = new Date(year, month - 1, day, hours, minutes, 0)
+
+  // Get UTC date
+  const utcDate = new Date(localDate.toLocaleString("en-US", { timeZone: timezone }))
+
+  const utcYear = utcDate.getUTCFullYear()
+  const utcMonth = String(utcDate.getUTCMonth() + 1).padStart(2, "0")
+  const utcDay = String(utcDate.getUTCDate()).padStart(2, "0")
+  const utcHour = String(utcDate.getUTCHours()).padStart(2, "0")
+  const utcMinute = String(utcDate.getUTCMinutes()).padStart(2, "0")
+
+  return {
+    date: `${utcYear}-${utcMonth}-${utcDay}`,
+    time: `${utcHour}:${utcMinute}`,
+  }
+}
+
 export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, initialConfig }) => {
   const today = new Date().toISOString().split("T")[0]
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0]
+
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   const [config, setConfig] = useState<RepeatConfig>(
     initialConfig || {
@@ -202,10 +230,17 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
       daysOfWeek: [1, 3, 5], // Mon, Wed, Fri by default
       startDate: today,
       startTime: "09:00",
-      endDate: tomorrow, // default to tomorrow instead of null
+      endDate: tomorrow,
       endTime: "23:59",
     },
   )
+
+  useEffect(() => {
+    if (initialConfig) {
+      console.log("[v0] Updating picker with initialConfig:", initialConfig)
+      setConfig(initialConfig)
+    }
+  }, [initialConfig])
 
   const handleFrequencyChange = (frequency: "hourly" | "daily" | "weekly" | "monthly" | "yearly") => {
     setConfig((prev) => ({
@@ -229,12 +264,23 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
   }
 
   const cronExpression = generateCron(config)
+
+  const utcStart = convertToUTC(config.startDate, config.startTime, userTimezone)
+  const utcConfigForCron: RepeatConfig = {
+    ...config,
+    startDate: utcStart.date,
+    startTime: utcStart.time,
+  }
+  const cronInUTC = generateCron(utcConfigForCron)
+
   const description = generateDescription(config)
   const nextRuns = calculateNextRuns(config)
 
   const handleDone = () => {
     const output: CronOutput = {
       cron: cronExpression,
+      cronInUTC, // Include UTC CRON
+      timezone: userTimezone, // Include timezone
       config,
       description,
       nextRuns,
@@ -326,7 +372,9 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
       {/* Summary */}
       <div className="mb-6 rounded-md bg-muted p-3">
         <p className="text-sm text-foreground">{description}</p>
-        <p className="mt-2 font-mono text-xs text-muted-foreground">CRON: {cronExpression}</p>
+        <p className="mt-2 font-mono text-xs text-muted-foreground">CRON (Local): {cronExpression}</p>
+        <p className="mt-1 font-mono text-xs text-muted-foreground">CRON (UTC): {cronInUTC}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Timezone: {userTimezone}</p>
       </div>
 
       {/* Actions */}

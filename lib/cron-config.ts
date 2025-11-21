@@ -1,0 +1,112 @@
+import type { RepeatConfig } from "@/components/cron-repeat-picker"
+
+export interface SimplifiedCronConfig {
+  utcCron: string
+  startDate: string // YYYY-MM-DD
+  endDate: string // YYYY-MM-DD
+  timezone: string
+}
+
+/**
+ * Parse CRON expression to extract frequency details
+ * Returns a RepeatConfig based on the CRON pattern
+ */
+export function parseCronExpression(cron: string): Partial<RepeatConfig> {
+  const parts = cron.split(" ")
+  if (parts.length < 5) return {}
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
+
+  const extractedTime = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`
+
+  // Detect frequency and interval
+  if (hour.startsWith("*/")) {
+    const interval = Number.parseInt(hour.slice(2))
+    return { frequency: "hourly", interval, startTime: extractedTime }
+  }
+
+  if (dayOfMonth.startsWith("*/")) {
+    const interval = Number.parseInt(dayOfMonth.slice(2))
+    return { frequency: "daily", interval, startTime: extractedTime }
+  }
+
+  if (month.startsWith("*/")) {
+    const interval = Number.parseInt(month.slice(2))
+    const dayNum = Number.parseInt(dayOfMonth)
+    return { frequency: "monthly", interval, startTime: extractedTime }
+  }
+
+  if (dayOfWeek !== "*") {
+    const days = dayOfWeek.split(",").map((d) => {
+      const num = Number.parseInt(d)
+      return num === 7 ? 0 : num // Convert 7 (Sunday) to 0
+    })
+    return { frequency: "weekly", interval: 1, daysOfWeek: days, startTime: extractedTime }
+  }
+
+  if (month !== "*" && dayOfMonth !== "*") {
+    return { frequency: "yearly", interval: 1, startTime: extractedTime }
+  }
+
+  // Default to daily
+  return { frequency: "daily", interval: 1, startTime: extractedTime }
+}
+
+/**
+ * Convert a RepeatConfig + dates to the simplified storage format
+ * Use this when user clicks "Done" to save
+ */
+export function toSimplifiedConfig(
+  utcCron: string,
+  startDate: string,
+  endDate: string,
+  timezone: string,
+): SimplifiedCronConfig {
+  return {
+    utcCron,
+    startDate,
+    endDate,
+    timezone,
+  }
+}
+
+/**
+ * Load a simplified config from DB and convert to RepeatConfig for editing
+ * This reconstructs the full config from the minimal stored data
+ */
+export function fromSimplifiedConfig(stored: SimplifiedCronConfig): RepeatConfig {
+  const parsed = parseCronExpression(stored.utcCron)
+
+  return {
+    frequency: (parsed.frequency || "daily") as any,
+    interval: parsed.interval || 1,
+    daysOfWeek: parsed.daysOfWeek,
+    startDate: stored.startDate,
+    startTime: parsed.startTime || "09:00", // Use extracted time from CRON, fallback to 09:00
+    endDate: stored.endDate,
+    endTime: "23:59",
+  }
+}
+
+/**
+ * Example DB schema:
+ *
+ * CREATE TABLE quiz_schedules (
+ *   id UUID PRIMARY KEY,
+ *   quiz_id UUID NOT NULL,
+ *   utc_cron VARCHAR(50) NOT NULL,
+ *   start_date DATE NOT NULL,
+ *   end_date DATE NOT NULL,
+ *   timezone VARCHAR(100) NOT NULL,
+ *   created_at TIMESTAMP DEFAULT NOW(),
+ *   updated_at TIMESTAMP DEFAULT NOW()
+ * );
+ *
+ * Example stored data:
+ * {
+ *   "utcCron": "0 14 * * 1,3,5",
+ *   "startDate": "2025-11-21",
+ *   "endDate": "2025-12-21",
+ *   "timezone": "America/New_York"
+ * }
+ */
