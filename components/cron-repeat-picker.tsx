@@ -83,6 +83,8 @@ function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
   const currentDate = new Date(startDateTime)
   const cronExpression = generateCron(config)
 
+  const startWeekNumber = Math.floor((currentDate.getDate() - currentDate.getDay()) / 7)
+
   while (runs.length < count) {
     // Check if within end range
     if (currentDate > endDateTime) {
@@ -100,8 +102,13 @@ function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
         isValid = currentDate.getHours() === startHour && currentDate.getMinutes() === startMinute
         break
       case "weekly": {
+        const currentWeekNumber = Math.floor((currentDate.getDate() - currentDate.getDay()) / 7)
+        const weekDifference = currentWeekNumber - startWeekNumber
+        const isCorrectWeek = weekDifference % config.interval === 0
+
         const dayOfWeek = currentDate.getDay()
         isValid =
+          isCorrectWeek &&
           (config.daysOfWeek?.includes(dayOfWeek) ?? false) &&
           currentDate.getHours() === startHour &&
           currentDate.getMinutes() === startMinute
@@ -180,15 +187,17 @@ function generateCron(config: RepeatConfig, useUTC = false): string {
       cronExpression = `${minute} ${hour} * * ${days}`
       break
     }
-    case "monthly":
+    case "monthly": {
       // Use the day from startDate for monthly recurrence
       const startDay = Number(config.startDate.split("-")[2])
       cronExpression = `${minute} ${hour} ${startDay} */${interval} *`
       break
-    case "yearly":
+    }
+    case "yearly": {
       const [, month, day] = config.startDate.split("-").map(Number)
       cronExpression = `${minute} ${hour} ${day} ${month} *`
       break
+    }
     default:
       cronExpression = `${minute} ${hour} * * *`
   }
