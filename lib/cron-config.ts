@@ -5,6 +5,10 @@ export interface SimplifiedCronConfig {
   startDate: string // YYYY-MM-DD
   endDate: string // YYYY-MM-DD
   timezone: string
+  // Standard CRON cannot express "every 2 weeks" - these fields are essential
+  interval: number
+  frequency: "hourly" | "daily" | "weekly" | "monthly" | "yearly"
+  daysOfWeek?: number[] // For weekly recurrence
 }
 
 /**
@@ -61,12 +65,20 @@ export function toSimplifiedConfig(
   startDate: string,
   endDate: string,
   timezone: string,
+  config: {
+    interval: number
+    frequency: "hourly" | "daily" | "weekly" | "monthly" | "yearly"
+    daysOfWeek?: number[]
+  },
 ): SimplifiedCronConfig {
   return {
     utcCron,
     startDate,
     endDate,
     timezone,
+    interval: config.interval,
+    frequency: config.frequency,
+    daysOfWeek: config.daysOfWeek,
   }
 }
 
@@ -78,11 +90,11 @@ export function fromSimplifiedConfig(stored: SimplifiedCronConfig): RepeatConfig
   const parsed = parseCronExpression(stored.utcCron)
 
   return {
-    frequency: (parsed.frequency || "daily") as any,
-    interval: parsed.interval || 1,
-    daysOfWeek: parsed.daysOfWeek,
+    frequency: stored.frequency,
+    interval: stored.interval,
+    daysOfWeek: stored.daysOfWeek || parsed.daysOfWeek,
     startDate: stored.startDate,
-    startTime: parsed.startTime || "09:00", // Use extracted time from CRON, fallback to 09:00
+    startTime: parsed.startTime || "09:00",
     endDate: stored.endDate,
     endTime: "23:59",
   }
@@ -98,15 +110,21 @@ export function fromSimplifiedConfig(stored: SimplifiedCronConfig): RepeatConfig
  *   start_date DATE NOT NULL,
  *   end_date DATE NOT NULL,
  *   timezone VARCHAR(100) NOT NULL,
+ *   interval INT NOT NULL,
+ *   frequency VARCHAR(20) NOT NULL,
+ *   days_of_week INT[] (for weekly recurrence),
  *   created_at TIMESTAMP DEFAULT NOW(),
  *   updated_at TIMESTAMP DEFAULT NOW()
  * );
  *
  * Example stored data:
  * {
- *   "utcCron": "0 14 * * 1,3,5",
+ *   "utcCron": "0 4 * * 1",
  *   "startDate": "2025-11-21",
  *   "endDate": "2025-12-21",
- *   "timezone": "America/New_York"
+ *   "timezone": "Asia/Calcutta",
+ *   "interval": 2,
+ *   "frequency": "weekly",
+ *   "daysOfWeek": [1]
  * }
  */

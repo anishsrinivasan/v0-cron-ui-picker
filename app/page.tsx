@@ -11,7 +11,17 @@ export default function Home() {
 
   const handleRepeatSubmit = (data: CronOutput) => {
     setOutput(data)
-    const configToStore = toSimplifiedConfig(data.cronInUTC, data.config.startDate, data.config.endDate, data.timezone)
+    const configToStore = toSimplifiedConfig(
+      data.cronInUTC,
+      data.config.startDate,
+      data.config.endDate,
+      data.timezone,
+      {
+        interval: data.config.interval,
+        frequency: data.config.frequency,
+        daysOfWeek: data.config.daysOfWeek,
+      },
+    )
     setStoredConfig(configToStore)
   }
 
@@ -21,6 +31,9 @@ export default function Home() {
       startDate: "2025-11-21",
       endDate: "2025-12-21",
       timezone: "America/New_York",
+      interval: 1,
+      frequency: "weekly",
+      daysOfWeek: [1, 3, 5],
     }
 
     console.log("[v0] Loading config from DB:", mockDBConfig)

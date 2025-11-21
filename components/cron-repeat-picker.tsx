@@ -22,6 +22,7 @@ export interface CronOutput {
   config: RepeatConfig
   description: string
   nextRuns: string[]
+  simplifiedConfig: any // Include simplified config for direct database storage
 }
 
 interface CronRepeatPickerProps {
@@ -291,6 +292,17 @@ function getStartTimeMismatch(config: RepeatConfig): string | null {
   return null
 }
 
+function toSimplifiedConfig(cronInUTC: string, startDate: string, endDate: string, timezone: string, config: any): any {
+  // Implement the logic to simplify the config
+  return {
+    cronInUTC,
+    startDate,
+    endDate,
+    timezone,
+    ...config,
+  }
+}
+
 export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, initialConfig }) => {
   const today = new Date().toISOString().split("T")[0]
   const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0]
@@ -353,13 +365,20 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
   const firstRunMismatch = getStartTimeMismatch(config)
 
   const handleDone = () => {
+    const simplifiedConfig = toSimplifiedConfig(cronInUTC, config.startDate, config.endDate, userTimezone, {
+      interval: config.interval,
+      frequency: config.frequency,
+      daysOfWeek: config.daysOfWeek,
+    })
+
     const output: CronOutput = {
       cron: cronExpression,
-      cronInUTC, // Include UTC CRON
-      timezone: userTimezone, // Include timezone
+      cronInUTC,
+      timezone: userTimezone,
       config,
       description,
       nextRuns,
+      simplifiedConfig,
     }
     onSubmit?.(output)
   }
