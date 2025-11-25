@@ -1,4 +1,4 @@
-import type { RepeatConfig } from "@/components/cron-repeat-picker"
+import type { RepeatConfig } from "@/components/repeat-picker"
 import { RRule } from "rrule"
 
 export interface SimplifiedRRuleConfig {
