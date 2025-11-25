@@ -1,39 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import { CronRepeatPicker, type CronOutput } from "@/components/cron-repeat-picker"
-import { toSimplifiedConfig, fromSimplifiedConfig, type SimplifiedCronConfig } from "@/lib/cron-config"
+import { CronRepeatPicker, type RRuleOutput } from "@/components/cron-repeat-picker"
+import { parseRRuleString, type SimplifiedRRuleConfig } from "@/lib/rrule-config"
 
 export default function Home() {
-  const [output, setOutput] = useState<CronOutput | null>(null)
-  const [storedConfig, setStoredConfig] = useState<SimplifiedCronConfig | null>(null)
+  const [output, setOutput] = useState<RRuleOutput | null>(null)
+  const [storedConfig, setStoredConfig] = useState<SimplifiedRRuleConfig | null>(null)
   const [isEditing, setIsEditing] = useState(false)
 
-  const handleRepeatSubmit = (data: CronOutput) => {
+  const handleRepeatSubmit = (data: RRuleOutput) => {
     setOutput(data)
-    const configToStore = toSimplifiedConfig(
-      data.cronInUTC,
-      data.config.startDate,
-      data.config.endDate,
-      data.timezone,
-      {
-        interval: data.config.interval,
-        frequency: data.config.frequency,
-        daysOfWeek: data.config.daysOfWeek,
-      },
-    )
-    setStoredConfig(configToStore)
+    setStoredConfig(data.simplifiedConfig)
   }
 
   const handleLoadFromDB = () => {
-    const mockDBConfig: SimplifiedCronConfig = {
-      utcCron: "0 14 * * 1,3,5",
-      startDate: "2025-11-21",
-      endDate: "2025-12-21",
+    const mockDBConfig: SimplifiedRRuleConfig = {
+      rrule: "DTSTART:20251121T040000Z\nRRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR;UNTIL=20251221T235900Z",
       timezone: "America/New_York",
-      interval: 1,
-      frequency: "weekly",
-      daysOfWeek: [1, 3, 5],
     }
 
     console.log("[v0] Loading config from DB:", mockDBConfig)
@@ -75,7 +59,24 @@ export default function Home() {
           <div className="flex justify-center">
             <CronRepeatPicker
               onSubmit={handleRepeatSubmit}
-              initialConfig={isEditing ? fromSimplifiedConfig(storedConfig!) : undefined}
+              initialConfig={
+                isEditing && storedConfig
+                  ? (() => {
+                      const parsed = parseRRuleString(storedConfig.rrule)
+                      return parsed
+                        ? {
+                            frequency: parsed.frequency,
+                            interval: parsed.interval,
+                            daysOfWeek: parsed.daysOfWeek,
+                            startDate: parsed.startDate,
+                            startTime: parsed.startTime,
+                            endDate: parsed.endDate,
+                            endTime: parsed.endTime,
+                          }
+                        : undefined
+                    })()
+                  : undefined
+              }
             />
           </div>
 
@@ -101,17 +102,17 @@ export default function Home() {
               <div className="rounded-lg border border-border bg-card p-4">
                 <h3 className="font-semibold text-foreground mb-3">Database Config (Simplified)</h3>
                 <pre className="rounded bg-muted p-3 font-mono text-xs text-foreground overflow-auto">
-                  {JSON.stringify(storedConfig, null, 2)}
+                  {JSON.stringify(output.simplifiedConfig, null, 2)}
                 </pre>
               </div>
 
               <div className="rounded-lg border border-border bg-card p-4">
-                <h3 className="font-semibold text-foreground mb-3">CRON Expressions</h3>
+                <h3 className="font-semibold text-foreground mb-3">RRULE Expression</h3>
                 <div className="space-y-2">
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">UTC CRON (Server)</p>
-                    <code className="block rounded bg-muted p-2 font-mono text-sm text-foreground">
-                      {output.cronInUTC}
+                    <p className="text-xs text-muted-foreground mb-1">RRULE (Server)</p>
+                    <code className="block rounded bg-muted p-2 font-mono text-sm text-foreground break-words">
+                      {output.rrule}
                     </code>
                   </div>
                   <div>

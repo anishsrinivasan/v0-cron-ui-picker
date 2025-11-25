@@ -2,8 +2,10 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
+import { RRule, datetime } from "rrule"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { parseRRuleString, type SimplifiedRRuleConfig } from "@/lib/rrule-config"
 
 export interface RepeatConfig {
   frequency: "hourly" | "daily" | "weekly" | "monthly" | "yearly"
@@ -11,22 +13,21 @@ export interface RepeatConfig {
   daysOfWeek?: number[] // 0-6, 0 = Sunday
   startDate: string // YYYY-MM-DD
   startTime: string // HH:MM
-  endDate: string // now required (not nullable)
-  endTime: string // now required
+  endDate: string // YYYY-MM-DD
+  endTime: string // HH:MM
 }
 
-export interface CronOutput {
-  cron: string
-  cronInUTC: string
+export interface RRuleOutput {
+  rrule: string // RRULE string for storage
   timezone: string
   config: RepeatConfig
   description: string
   nextRuns: string[]
-  simplifiedConfig: any // Include simplified config for direct database storage
+  simplifiedConfig: SimplifiedRRuleConfig
 }
 
 interface CronRepeatPickerProps {
-  onSubmit?: (output: CronOutput) => void
+  onSubmit?: (output: RRuleOutput) => void
   initialConfig?: RepeatConfig
 }
 
@@ -40,170 +41,62 @@ const FREQUENCY_OPTIONS = [
   { value: "yearly", label: "Year" },
 ]
 
-function isCronMatch(date: Date, cronExpression: string, startMinute: number): boolean {
-  const [cronMinute, cronHour] = cronExpression.split(" ")
-
-  const minute = date.getMinutes()
-  const hour = date.getHours()
-
-  // Check minute
-  if (cronMinute !== "*") {
-    const cronMinuteNum = Number.parseInt(cronMinute)
-    if (minute !== cronMinuteNum) return false
-  }
-
-  // Check hour
-  if (cronHour === "*") return true
-
-  if (cronHour.startsWith("*/")) {
-    // Handle */n pattern (every n hours)
-    const interval = Number.parseInt(cronHour.substring(2))
-    return hour % interval === 0
-  }
-
-  // Handle specific hours
-  if (cronHour.includes(",")) {
-    return cronHour.split(",").map(Number).includes(hour)
-  }
-
-  return hour === Number.parseInt(cronHour)
+const frequencyMap = {
+  hourly: RRule.HOURLY,
+  daily: RRule.DAILY,
+  weekly: RRule.WEEKLY,
+  monthly: RRule.MONTHLY,
+  yearly: RRule.YEARLY,
 }
 
-function calculateNextRuns(config: RepeatConfig, count = 5): string[] {
-  const runs: string[] = []
+const dayToRRuleWeekday = [RRule.SU, RRule.MO, RRule.TU, RRule.WE, RRule.TH, RRule.FR, RRule.SA]
 
-  const [startYear, startMonth, startDay] = config.startDate.split("-").map(Number)
-  const [startHour, startMinute] = config.startTime.split(":").map(Number)
+function generateRRuleString(config: RepeatConfig, timezone: string): string {
+  const [year, month, day] = config.startDate.split("-").map(Number)
+  const [hour, minute] = config.startTime.split(":").map(Number)
 
-  const startDateTime = new Date(startYear, startMonth - 1, startDay, startHour, startMinute, 0)
-
-  const endDateTime = new Date(config.endDate)
+  const [endYear, endMonth, endDay] = config.endDate.split("-").map(Number)
   const [endHour, endMinute] = config.endTime.split(":").map(Number)
-  endDateTime.setHours(endHour, endMinute, 0)
 
-  const currentDate = new Date(startDateTime)
-  const cronExpression = generateCron(config)
+  const dtstart = datetime(year, month, day, hour, minute, 0)
+  const until = datetime(endYear, endMonth, endDay, endHour, endMinute, 0)
 
-  const startWeekNumber = Math.floor((currentDate.getDate() - currentDate.getDay()) / 7)
+  const freq = frequencyMap[config.frequency]
+  const byweekday =
+    config.frequency === "weekly" && config.daysOfWeek ? config.daysOfWeek.map((d) => dayToRRuleWeekday[d]) : undefined
 
-  while (runs.length < count) {
-    // Check if within end range
-    if (currentDate > endDateTime) {
-      break
-    }
+  const rule = new RRule({
+    freq,
+    interval: config.interval,
+    dtstart,
+    until,
+    byweekday,
+    tzid: timezone,
+  })
 
-    let isValid = false
+  return rule.toString()
+}
 
-    switch (config.frequency) {
-      case "hourly": {
-        isValid = isCronMatch(currentDate, cronExpression, startMinute)
-        break
-      }
-      case "daily":
-        isValid = currentDate.getHours() === startHour && currentDate.getMinutes() === startMinute
-        break
-      case "weekly": {
-        const currentWeekNumber = Math.floor((currentDate.getDate() - currentDate.getDay()) / 7)
-        const weekDifference = currentWeekNumber - startWeekNumber
-        const isCorrectWeek = weekDifference % config.interval === 0
+function calculateNextRuns(config: RepeatConfig, timezone: string, count = 5): string[] {
+  const rruleString = generateRRuleString(config, timezone)
+  const rule = RRule.fromString(rruleString)
 
-        const dayOfWeek = currentDate.getDay()
-        isValid =
-          isCorrectWeek &&
-          (config.daysOfWeek?.includes(dayOfWeek) ?? false) &&
-          currentDate.getHours() === startHour &&
-          currentDate.getMinutes() === startMinute
-        break
-      }
-      case "monthly": {
-        const dayOfMonth = currentDate.getDate()
-        const startDayOfMonth = new Date(startYear, startMonth - 1, startDay).getDate()
-        isValid =
-          dayOfMonth === startDayOfMonth &&
-          currentDate.getHours() === startHour &&
-          currentDate.getMinutes() === startMinute
-        break
-      }
-      case "yearly":
-        isValid =
-          currentDate.getMonth() === startDateTime.getMonth() &&
-          currentDate.getDate() === startDateTime.getDate() &&
-          currentDate.getHours() === startHour &&
-          currentDate.getMinutes() === startMinute
-        break
-    }
+  const runs: string[] = []
+  const occurrences = rule.all((date, i) => i < count)
 
-    if (isValid) {
-      const formatted = currentDate.toLocaleString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-      runs.push(formatted)
-    }
-
-    // Increment based on frequency
-    switch (config.frequency) {
-      case "hourly":
-        currentDate.setHours(currentDate.getHours() + 1)
-        break
-      case "daily":
-        currentDate.setDate(currentDate.getDate() + config.interval)
-        break
-      case "weekly":
-        currentDate.setDate(currentDate.getDate() + 1)
-        break
-      case "monthly":
-        currentDate.setDate(currentDate.getDate() + 1)
-        break
-      case "yearly":
-        currentDate.setDate(currentDate.getDate() + 1)
-        break
-    }
+  for (const date of occurrences) {
+    const formatted = date.toLocaleString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
+    runs.push(formatted)
   }
 
   return runs
-}
-
-function generateCron(config: RepeatConfig, useUTC = false): string {
-  const { frequency, interval, daysOfWeek } = config
-  const [hour, minute] = useUTC
-    ? [Number(config.startTime.split(":")[0]), Number(config.startTime.split(":")[1])]
-    : config.startTime.split(":").map(Number)
-
-  let cronExpression = ""
-
-  switch (frequency) {
-    case "hourly":
-      cronExpression = `${minute} */${interval} * * *`
-      break
-    case "daily":
-      cronExpression = `${minute} ${hour} */${interval} * *`
-      break
-    case "weekly": {
-      const days = daysOfWeek && daysOfWeek.length > 0 ? daysOfWeek.map((d) => (d === 0 ? 7 : d)).join(",") : "*"
-      cronExpression = `${minute} ${hour} * * ${days}`
-      break
-    }
-    case "monthly": {
-      // Use the day from startDate for monthly recurrence
-      const startDay = Number(config.startDate.split("-")[2])
-      cronExpression = `${minute} ${hour} ${startDay} */${interval} *`
-      break
-    }
-    case "yearly": {
-      const [, month, day] = config.startDate.split("-").map(Number)
-      cronExpression = `${minute} ${hour} ${day} ${month} *`
-      break
-    }
-    default:
-      cronExpression = `${minute} ${hour} * * *`
-  }
-
-  return cronExpression
 }
 
 function generateDescription(config: RepeatConfig): string {
@@ -239,36 +132,13 @@ function generateDescription(config: RepeatConfig): string {
   }
 
   desc += ` starting ${startDate} at ${startTime}`
-
   desc += ` until ${endDate} at ${endTime}`
 
   return desc
 }
 
-function convertToUTC(dateStr: string, timeStr: string, timezone: string): { date: string; time: string } {
-  const [year, month, day] = dateStr.split("-").map(Number)
-  const [hours, minutes] = timeStr.split(":").map(Number)
-
-  // Create date in local timezone
-  const localDate = new Date(year, month - 1, day, hours, minutes, 0)
-
-  // Get UTC date
-  const utcDate = new Date(localDate.toLocaleString("en-US", { timeZone: timezone }))
-
-  const utcYear = utcDate.getUTCFullYear()
-  const utcMonth = String(utcDate.getUTCMonth() + 1).padStart(2, "0")
-  const utcDay = String(utcDate.getUTCDate()).padStart(2, "0")
-  const utcHour = String(utcDate.getUTCHours()).padStart(2, "0")
-  const utcMinute = String(utcDate.getUTCMinutes()).padStart(2, "0")
-
-  return {
-    date: `${utcYear}-${utcMonth}-${utcDay}`,
-    time: `${utcHour}:${utcMinute}`,
-  }
-}
-
-function getStartTimeMismatch(config: RepeatConfig): string | null {
-  const nextRuns = calculateNextRuns(config, 1)
+function getStartTimeMismatch(config: RepeatConfig, timezone: string): string | null {
+  const nextRuns = calculateNextRuns(config, timezone, 1)
   if (nextRuns.length === 0) return null
 
   const [configYear, configMonth, configDay] = config.startDate.split("-").map(Number)
@@ -292,14 +162,25 @@ function getStartTimeMismatch(config: RepeatConfig): string | null {
   return null
 }
 
-function toSimplifiedConfig(cronInUTC: string, startDate: string, endDate: string, timezone: string, config: any): any {
-  // Implement the logic to simplify the config
+function toSimplifiedConfig(rruleString: string, timezone: string): SimplifiedRRuleConfig {
   return {
-    cronInUTC,
-    startDate,
-    endDate,
+    rrule: rruleString,
     timezone,
-    ...config,
+  }
+}
+
+function fromSimplifiedConfig(stored: SimplifiedRRuleConfig): RepeatConfig | null {
+  const parsed = parseRRuleString(stored.rrule)
+  if (!parsed) return null
+
+  return {
+    frequency: parsed.frequency,
+    interval: parsed.interval,
+    daysOfWeek: parsed.daysOfWeek,
+    startDate: parsed.startDate,
+    startTime: parsed.startTime,
+    endDate: parsed.endDate,
+    endTime: parsed.endTime,
   }
 }
 
@@ -313,7 +194,7 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
     initialConfig || {
       frequency: "weekly",
       interval: 1,
-      daysOfWeek: [1, 3, 5], // Mon, Wed, Fri by default
+      daysOfWeek: [1, 3, 5],
       startDate: today,
       startTime: "09:00",
       endDate: tomorrow,
@@ -323,7 +204,6 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
 
   useEffect(() => {
     if (initialConfig) {
-      console.log("[v0] Updating picker with initialConfig:", initialConfig)
       setConfig(initialConfig)
     }
   }, [initialConfig])
@@ -349,31 +229,16 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
     })
   }
 
-  const cronExpression = generateCron(config)
-
-  const utcStart = convertToUTC(config.startDate, config.startTime, userTimezone)
-  const utcConfigForCron: RepeatConfig = {
-    ...config,
-    startDate: utcStart.date,
-    startTime: utcStart.time,
-  }
-  const cronInUTC = generateCron(utcConfigForCron)
-
+  const rruleString = generateRRuleString(config, userTimezone)
   const description = generateDescription(config)
-  const nextRuns = calculateNextRuns(config)
-
-  const firstRunMismatch = getStartTimeMismatch(config)
+  const nextRuns = calculateNextRuns(config, userTimezone)
+  const firstRunMismatch = getStartTimeMismatch(config, userTimezone)
 
   const handleDone = () => {
-    const simplifiedConfig = toSimplifiedConfig(cronInUTC, config.startDate, config.endDate, userTimezone, {
-      interval: config.interval,
-      frequency: config.frequency,
-      daysOfWeek: config.daysOfWeek,
-    })
+    const simplifiedConfig = toSimplifiedConfig(rruleString, userTimezone)
 
-    const output: CronOutput = {
-      cron: cronExpression,
-      cronInUTC,
+    const output: RRuleOutput = {
+      rrule: rruleString,
       timezone: userTimezone,
       config,
       description,
@@ -387,7 +252,6 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
     <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg">
       <h2 className="mb-6 text-lg font-semibold text-foreground">Custom recurrence</h2>
 
-      {/* Repeat Every Section */}
       <div className="mb-6 space-y-3">
         <label className="text-sm font-medium text-foreground">Repeat every</label>
         <div className="flex gap-2">
@@ -406,7 +270,6 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
         </div>
       </div>
 
-      {/* Repeat On (for weekly) */}
       {config.frequency === "weekly" && (
         <div className="mb-6 space-y-3">
           <label className="text-sm font-medium text-foreground">Repeat on</label>
@@ -464,24 +327,21 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
         </div>
       </div>
 
-      {/* Summary */}
       <div className="mb-6 rounded-md bg-muted p-3">
         <p className="text-sm text-foreground">{description}</p>
-        <p className="mt-2 font-mono text-xs text-muted-foreground">CRON (Local): {cronExpression}</p>
-        <p className="mt-1 font-mono text-xs text-muted-foreground">CRON (UTC): {cronInUTC}</p>
+        <p className="mt-2 font-mono text-xs text-muted-foreground">RRULE: {rruleString}</p>
         <p className="mt-1 text-xs text-muted-foreground">Timezone: {userTimezone}</p>
 
         {firstRunMismatch && (
           <div className="mt-3 rounded-md bg-yellow-500/10 p-2 border border-yellow-500/30">
             <p className="text-xs text-yellow-700 dark:text-yellow-400">
-              ⚠️ Note: Due to CRON limitations, the schedule will actually start at <strong>{firstRunMismatch}</strong>{" "}
+              ⚠️ Note: Due to RRULE limitations, the schedule will actually start at <strong>{firstRunMismatch}</strong>{" "}
               instead of {config.startDate} at {config.startTime}.
             </p>
           </div>
         )}
       </div>
 
-      {/* Actions */}
       <div className="flex gap-2 justify-end">
         <Button variant="outline">Cancel</Button>
         <Button onClick={handleDone} className="bg-primary hover:bg-primary/90">
