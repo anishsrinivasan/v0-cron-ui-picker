@@ -32,6 +32,7 @@ export default function Home() {
     setOutput(null)
   }
 
+  console.log("OC", output?.nextRuns)
   return (
     <main className="min-h-screen bg-background p-8">
       <div className="mx-auto max-w-6xl">

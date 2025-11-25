@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { RRule, datetime } from "rrule"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -71,70 +71,45 @@ function generateRRuleString(config: RepeatConfig, timezone: string): string {
     dtstart,
     until,
     byweekday,
-    tzid: timezone,
   })
 
-  return rule.toString()
+  // Get the RRULE output from the library
+  const ruleString = rule.toString()
+
+  // Extract the RRULE part (skip DTSTART since we'll format it with TZID)
+  const rrulePart = ruleString
+    .split("\n")
+    .filter((line) => line.startsWith("RRULE:"))
+    .join("")
+
+  // Format DTSTART with timezone
+  const dtstartStr = `DTSTART;TZID=${timezone}:${String(year).padStart(4, "0")}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}00`
+
+  return `${dtstartStr}\n${rrulePart}`
 }
 
 function calculateNextRuns(config: RepeatConfig, timezone: string, count = 5): string[] {
   const rruleString = generateRRuleString(config, timezone)
+  console.log("[v0] RRULE String:", rruleString)
+
   const rule = RRule.fromString(rruleString)
+  console.log("[v0] Rule options:", rule.options)
 
-  const runs: string[] = []
   const occurrences = rule.all((date, i) => i < count)
+  console.log("[v0] Occurrences:", occurrences)
 
-  for (const date of occurrences) {
-    const formatted = date.toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    })
-    runs.push(formatted)
-  }
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true
+  })
 
-  return runs
-}
-
-function generateDescription(config: RepeatConfig): string {
-  const { frequency, interval, daysOfWeek, startDate, startTime, endDate, endTime } = config
-
-  let desc = `Repeats every `
-
-  if (interval > 1) {
-    desc += `${interval} `
-  }
-
-  switch (frequency) {
-    case "hourly":
-      desc += interval === 1 ? "hour" : "hours"
-      break
-    case "daily":
-      desc += interval === 1 ? "day" : "days"
-      break
-    case "weekly": {
-      desc += interval === 1 ? "week" : "weeks"
-      if (daysOfWeek && daysOfWeek.length > 0) {
-        const selectedDays = daysOfWeek.map((d) => DAYS_FULL[d]).join(", ")
-        desc += ` on ${selectedDays}`
-      }
-      break
-    }
-    case "monthly":
-      desc += interval === 1 ? "month" : "months"
-      break
-    case "yearly":
-      desc += "year"
-      break
-  }
-
-  desc += ` starting ${startDate} at ${startTime}`
-  desc += ` until ${endDate} at ${endTime}`
-
-  return desc
+  const arr = occurrences.map((date) => formatter.format(date))
+  console.log("Arr", arr);
+  return arr;
 }
 
 function getStartTimeMismatch(config: RepeatConfig, timezone: string): string | null {
@@ -145,8 +120,7 @@ function getStartTimeMismatch(config: RepeatConfig, timezone: string): string | 
   const [configHour, configMinute] = config.startTime.split(":").map(Number)
   const configDateTime = new Date(configYear, configMonth - 1, configDay, configHour, configMinute, 0)
 
-  const firstRunStr = nextRuns[0]
-  const firstRunDate = new Date(firstRunStr)
+  const firstRunDate = new Date(nextRuns[0])
 
   const timeDifference =
     configDateTime.getFullYear() !== firstRunDate.getFullYear() ||
@@ -156,7 +130,7 @@ function getStartTimeMismatch(config: RepeatConfig, timezone: string): string | 
     configDateTime.getMinutes() !== firstRunDate.getMinutes()
 
   if (timeDifference) {
-    return firstRunStr
+    return nextRuns[0]
   }
 
   return null
@@ -202,12 +176,6 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
     },
   )
 
-  useEffect(() => {
-    if (initialConfig) {
-      setConfig(initialConfig)
-    }
-  }, [initialConfig])
-
   const handleFrequencyChange = (frequency: "hourly" | "daily" | "weekly" | "monthly" | "yearly") => {
     setConfig((prev) => ({
       ...prev,
@@ -235,7 +203,10 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
   const firstRunMismatch = getStartTimeMismatch(config, userTimezone)
 
   const handleDone = () => {
-    const simplifiedConfig = toSimplifiedConfig(rruleString, userTimezone)
+    const simplifiedConfig: SimplifiedRRuleConfig = {
+      rrule: rruleString,
+      timezone: userTimezone,
+    }
 
     const output: RRuleOutput = {
       rrule: rruleString,
@@ -350,4 +321,42 @@ export const CronRepeatPicker: React.FC<CronRepeatPickerProps> = ({ onSubmit, in
       </div>
     </div>
   )
+}
+
+function generateDescription(config: RepeatConfig): string {
+  const { frequency, interval, daysOfWeek, startDate, startTime, endDate, endTime } = config
+
+  let desc = `Repeats every `
+
+  if (interval > 1) {
+    desc += `${interval} `
+  }
+
+  switch (frequency) {
+    case "hourly":
+      desc += interval === 1 ? "hour" : "hours"
+      break
+    case "daily":
+      desc += interval === 1 ? "day" : "days"
+      break
+    case "weekly": {
+      desc += interval === 1 ? "week" : "weeks"
+      if (daysOfWeek && daysOfWeek.length > 0) {
+        const selectedDays = daysOfWeek.map((d) => DAYS_FULL[d]).join(", ")
+        desc += ` on ${selectedDays}`
+      }
+      break
+    }
+    case "monthly":
+      desc += interval === 1 ? "month" : "months"
+      break
+    case "yearly":
+      desc += "year"
+      break
+  }
+
+  desc += ` starting ${startDate} at ${startTime}`
+  desc += ` until ${endDate} at ${endTime}`
+
+  return desc
 }
