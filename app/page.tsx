@@ -109,8 +109,6 @@ export default function Home() {
                         #{index + 1}
                       </span>
                       <span>{run.local}</span>
-                      <span>|</span>
-                      <span>UTC: {run.iso}</span>
                     </div>
                   ))}
                 </div>
